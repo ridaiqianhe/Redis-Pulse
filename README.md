@@ -1,4 +1,4 @@
-# Redis API · Redis Pulse
+# Redis Pulse
 
 为 `yiduns` 和 `slides` 提供有期限、去重的 Redis 库存接口，以及 Neumorphism 风格的只读监控台。
 
