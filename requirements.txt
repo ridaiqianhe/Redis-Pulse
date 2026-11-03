@@ -1,6 +1,4 @@
 Flask==2.3.3
 Werkzeug==2.3.7
-gevent
-user_agents
-redis
-gunicorn
+redis==6.4.0
+gunicorn==23.0.0

@@ -4,7 +4,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from multiprocessing import cpu_count
 
-port = 16379
+port = int(os.environ.get("API_PORT", 16379))
 bind = f"0.0.0.0:{port}"
 workers = cpu_count() + 1
 threads = 2
@@ -12,7 +12,7 @@ worker_class = "gthread"
 forwarded_allow_ips = '*'
 worker_connections = 65535
 loglevel = 'error'
-reload = True
+reload = False
 
 # 创建日志文件夹
 log_dir = "./logs"
@@ -23,13 +23,13 @@ accesslog_path = os.path.join(log_dir, "logs.log")
 errorlog_path = os.path.join(log_dir, "error.log")
 
 # 设置访问日志
-access_log_handler = RotatingFileHandler(accesslog_path, maxBytes=1 * 1024 * 1024 * 1024, backupCount=5)  # 1GB 大小，保留 5 个备份
+access_log_handler = RotatingFileHandler(accesslog_path, maxBytes=1 * 1024 * 1024 * 1024, backupCount=2)  # 单类日志最多约 3GB
 access_log_handler.setLevel(logging.INFO)
 access_log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 access_log_handler.setFormatter(access_log_formatter)
 
 # 设置错误日志
-error_log_handler = RotatingFileHandler(errorlog_path, maxBytes=1 * 1024 * 1024 * 1024, backupCount=5)  # 1GB 大小，保留 5 个备份
+error_log_handler = RotatingFileHandler(errorlog_path, maxBytes=1 * 1024 * 1024 * 1024, backupCount=2)  # 单类日志最多约 3GB
 error_log_handler.setLevel(logging.ERROR)
 error_log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 error_log_handler.setFormatter(error_log_formatter)
@@ -40,7 +40,7 @@ gunicorn_logger.addHandler(access_log_handler)
 gunicorn_logger.addHandler(error_log_handler)
 
 # 访问日志格式
-access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" "%({X-Real-IP}i)s"'
+access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s" "%({X-Real-IP}i)s" "%({CF-Connecting-IP}i)s" "%({CF-Connecting-IPv6}i)s" "%({CF-Ray}i)s"'
 accesslog = accesslog_path
 errorlog = errorlog_path
 

@@ -15,7 +15,7 @@ class MonitorTests(unittest.TestCase):
 
     def test_log_parser_keeps_ip_and_strips_query(self):
         event = parse_line('127.0.0.1 - - [03/Nov/2026:20:21:04 +0800] "GET /api/counts?secret=x HTTP/1.1" 200 37 "-" "test-agent" "192.0.2.10"')
-        self.assertEqual(event[1:], ('192.0.2.10', 'GET', '/api/counts', 200, 37, 'test-agent'))
+        self.assertEqual(event[1:7], ('192.0.2.10', 'GET', '/api/counts', 200, 37, 'test-agent'))
         self.assertIsNone(parse_line('invalid'))
         self.assertIsNone(parse_line('127.0.0.1 - - [03/Nov/2026:20:21:04 +0800] "GET /monitor/api/snapshot HTTP/1.1" 200 37 "-" "test-agent" "192.0.2.10"'))
 
@@ -34,9 +34,9 @@ class MonitorTests(unittest.TestCase):
     def test_aggregation_errors_and_expiry(self):
         c = Collector()
         now = int(time.time())
-        c.ingest((now, '192.0.2.1', 'GET', '/api/readnum', 200, 50, 'agent'))
-        c.ingest((now, '192.0.2.1', 'GET', '/api/readnum', 500, 50, 'agent'))
-        c.ingest((now - 4000, '192.0.2.2', 'GET', '/old', 200, 50, 'agent'))
+        c.ingest((now, '192.0.2.1', 'GET', '/api/readnum', 200, 50, 'agent', '192.0.2.1', 'direct', ''))
+        c.ingest((now, '192.0.2.1', 'GET', '/api/readnum', 500, 50, 'agent', '192.0.2.1', 'direct', ''))
+        c.ingest((now - 4000, '192.0.2.2', 'GET', '/old', 200, 50, 'agent', '192.0.2.1', 'direct', ''))
         result = c.snapshot(15)
         self.assertEqual(result['summary']['total'], 2)
         self.assertEqual(result['summary']['errors'], 1)

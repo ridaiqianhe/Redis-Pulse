@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 monitor.env
 monitor-access.txt
+config
+.env
+logs/

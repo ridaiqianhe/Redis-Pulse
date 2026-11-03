@@ -1,7 +1,6 @@
 import collections
 import datetime as dt
 import functools
-import hmac
 import json
 import os
 from pathlib import Path
@@ -13,6 +12,7 @@ import urllib.request
 
 from flask import Flask, jsonify, redirect, render_template, request, session
 from werkzeug.security import check_password_hash
+from monitor.cloudflare import resolve_client
 
 ROOT = Path(__file__).resolve().parent
 app = Flask(__name__, template_folder=str(ROOT / 'templates'), static_folder=str(ROOT / 'static'), static_url_path='/monitor/static')
@@ -24,7 +24,7 @@ app.config.update(SECRET_KEY=os.environ.get('MONITOR_SECRET'), SESSION_COOKIE_NA
 LOG = Path(os.environ.get('MONITOR_LOG', '/logs/logs.log'))
 PROC = Path(os.environ.get('MONITOR_PROC', '/host/proc'))
 API = os.environ.get('MONITOR_API', 'http://127.0.0.1:16379')
-PATTERN = re.compile(r'^(\S+) .*?\[([^]]+)\] "(\S+) ([^ ]+) [^"]+" (\d{3}) (\S+) "[^"]*" "([^"]*)"(?: "([^"]*)")?')
+PATTERN = re.compile(r'^(\S+) .*?\[([^]]+)\] "(\S+) ([^ ]+) [^"]+" (\d{3}) (\S+) "[^"]*" "([^"]*)"(?: "([^"]*)")?(?: "([^"]*)" "([^"]*)" "([^"]*)")?')
 
 
 @functools.lru_cache(maxsize=4096)
@@ -36,13 +36,15 @@ def parse_line(line):
     match = PATTERN.match(line)
     if not match:
         return None
-    peer, date, method, target, status, size, agent, forwarded = match.groups()
+    peer, date, method, target, status, size, agent, forwarded, cf_ip, cf_ipv6, ray = match.groups()
     path = target.split('?', 1)[0][:200]
     if path.startswith('/monitor'):
         return None
     try:
-        return (log_time(date), (forwarded if forwarded and forwarded != '-' else peer)[:100],
-                method, path, int(status), int(size) if size.isdigit() else 0, agent[:160])
+        client, edge, source = resolve_client(peer, forwarded, cf_ip, cf_ipv6)
+        return (log_time(date), client, method, path, int(status),
+                int(size) if size.isdigit() else 0, agent[:160], edge, source,
+                (ray or '')[:100] if source == 'cloudflare' else '')
     except (ValueError, OverflowError):
         return None
 
@@ -71,16 +73,18 @@ class Collector:
         self.pending = b''
 
     def ingest(self, event):
-        stamp, ip, method, path, status, size, agent = event
+        stamp, ip, method, path, status, size, agent, edge, source, ray = event
         if stamp < time.time() - 3600 or stamp > time.time() + 60:
             return
         minute = stamp // 60
         bucket = self.buckets.setdefault(minute, {'count': 0, 'errors': 0, 'bytes': 0,
-            'ips': collections.Counter(), 'routes': collections.Counter()})
+            'ips': collections.Counter(), 'routes': collections.Counter(), 'unresolved_ips': 0})
         bucket['count'] += 1
         bucket['errors'] += status >= 400
         bucket['bytes'] += size
-        if ip in bucket['ips'] or len(bucket['ips']) < 2000:
+        if source == 'cloudflare_missing':
+            bucket['unresolved_ips'] += 1
+        elif ip in bucket['ips'] or len(bucket['ips']) < 2000:
             bucket['ips'][ip] += 1
         bucket['routes'][path if path in bucket['routes'] or len(bucket['routes']) < 200 else '其他'] += 1
         self.recent.append(event)
@@ -193,12 +197,13 @@ class Collector:
                 routes.update(bucket.get('routes', {}))
             series = [{'time': m * 60, 'count': self.buckets.get(m, {}).get('count', 0),
                        'errors': self.buckets.get(m, {}).get('errors', 0)} for m in range(first, now // 60 + 1)]
-            recent = [dict(zip(('time', 'ip', 'method', 'path', 'status', 'bytes', 'agent'), event))
+            recent = [dict(zip(('time', 'ip', 'method', 'path', 'status', 'bytes', 'agent', 'edge_ip', 'ip_source', 'ray_id'), event))
                       for event in reversed(self.recent) if event[0] >= first * 60][:100]
             observed = max(1, now - max(first * 60, self.coverage or now) + 1)
             return {'time': now, 'started': self.started, 'coverage': self.coverage,
                 'last_sample': self.last_sample, 'window': minutes,
                 'summary': {'total': total, 'errors': errors, 'unique_ips': len(ips),
+                    'unresolved_ips': sum(b.get('unresolved_ips', 0) for b in buckets),
                     'rpm': round(total * 60 / observed, 1), 'success': round(100 * (total - errors) / total, 2) if total else None},
                 'series': series, 'ips': [{'ip': ip, 'count': count} for ip, count in ips.most_common(10)],
                 'routes': [{'path': path, 'count': count} for path, count in routes.most_common(8)],
