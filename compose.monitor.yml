@@ -1,0 +1,35 @@
+services:
+  redis-monitor:
+    build:
+      context: .
+      dockerfile: monitor/Dockerfile
+    container_name: redis-monitor
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - monitor.env
+    environment:
+      MONITOR_LOG: /logs/logs.log
+      MONITOR_PROC: /host/proc
+    volumes:
+      - ./logs:/logs:ro
+      - /proc/stat:/host/proc/stat:ro
+      - /proc/meminfo:/host/proc/meminfo:ro
+      - /proc/loadavg:/host/proc/loadavg:ro
+      - /proc/uptime:/host/proc/uptime:ro
+      - /proc/net/dev:/host/proc/net/dev:ro
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 192m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:16380/monitor/login', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
