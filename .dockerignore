@@ -1,0 +1,11 @@
+.git
+.claude
+.env
+monitor.env
+monitor-access.txt
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.log
+logs/
+.DS_Store

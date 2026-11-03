@@ -1,5 +1,6 @@
 # -*- coding:utf-8 -*-
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
+import http.client
 import time
 import os
 import random
@@ -123,6 +124,32 @@ class Config(object):
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+
+@app.route('/monitor', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/monitor/', defaults={'path': ''}, methods=['GET', 'POST'])
+@app.route('/monitor/<path:path>', methods=['GET', 'POST'])
+def monitor_proxy(path):
+    """Forward only the monitoring namespace to the isolated local service."""
+    if request.content_length and request.content_length > 4096:
+        return Response('Request too large', status=413)
+    upstream = http.client.HTTPConnection('127.0.0.1', 16380, timeout=10)
+    try:
+        target = '/monitor/' + path
+        if request.query_string:
+            target += '?' + request.query_string.decode('ascii', errors='ignore')
+        headers = {name: request.headers[name] for name in
+                   ('Cookie', 'Content-Type', 'User-Agent') if name in request.headers}
+        headers['Host'] = request.host
+        upstream.request(request.method, target, body=request.get_data(), headers=headers)
+        result = upstream.getresponse()
+        forwarded = [(name, value) for name, value in result.getheaders()
+                     if name.lower() not in ('connection', 'transfer-encoding', 'content-length', 'server', 'date')]
+        return Response(result.read(), status=result.status, headers=forwarded)
+    except (OSError, http.client.HTTPException):
+        return Response('Monitoring service temporarily unavailable', status=503)
+    finally:
+        upstream.close()
 
 
 def read_unique_data(
